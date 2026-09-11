@@ -1,0 +1,16 @@
+[workspace]
+members = [
+    "quantum",
+    "crypto",
+    "detection",
+    "attacks",
+    "main_app",
+    "server",
+    "tests",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["SIH26141 Team"]
