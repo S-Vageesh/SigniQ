@@ -7,3 +7,6 @@
 {"ts":"2026-09-11T21:32:56.117Z","kind":"verify","label":"attack [channel_tampering]","accepted":false,"detail":"Rej — 18 mismatches across 64 positions — REJ: invalid — measurement mismatch ratio exceeds rejection threshold"}
 {"ts":"2026-09-11T21:32:56.118Z","kind":"verify","label":"attack [unauthorized_verification]","accepted":false,"detail":"Rej — 64 mismatches across 64 positions — replay detected: nonce already consumed"}
 {"ts":"2026-09-11T21:35:06.905Z","kind":"metrics","label":"evaluation","accepted":true,"detail":"performance evaluation over 60 trials (seed 7): teleport accuracy 1.0000, six-state accuracy 1.0000"}
+{"ts":"2026-09-11T22:38:16.456Z","kind":"setup","label":"key-generation","accepted":true,"detail":"Trent initialized 16 qubits x lambda=4; key commitment published"}
+{"ts":"2026-09-11T22:38:16.613Z","kind":"sign","label":"alice","accepted":true,"detail":"signed message (14 chars) with nonce 1; 128 signature bits"}
+{"ts":"2026-09-11T22:38:16.614Z","kind":"verify","label":"bob [verify]","accepted":true,"detail":"Acc1 — 0 mismatches across 64 positions — 1-ACC: valid and transferable — all measurement checks passed [Charlie consensus: true]"}

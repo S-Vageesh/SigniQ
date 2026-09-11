@@ -440,11 +440,52 @@ async fn main() {
         app
     };
 
-    let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("failed to bind port");
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(DEFAULT_PORT);
 
-    eprintln!("SIH26141 API server listening on http://{addr}");
+    // Bind with a clear error message and, on Windows, a fallback: OS error
+    // 10013 (PermissionDenied) happens when another process holds the port
+    // OR when Windows excluded port ranges (Hyper-V / WinNAT reservations)
+    // block it entirely — common right after a reboot. Fall back to the next
+    // few ports so a demo never dies on a stale reservation.
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            const MAX_FALLBACKS: u16 = 10;
+            eprintln!(
+                "warning: could not bind {addr} (os error 10013 — port held by another process or blocked by a Windows reserved port range)"
+            );
+            let mut bound = None;
+            for offset in 1..=MAX_FALLBACKS {
+                let candidate = SocketAddr::from(([127, 0, 0, 1], port + offset));
+                match tokio::net::TcpListener::bind(candidate).await {
+                    Ok(l) => {
+                        eprintln!("falling back to {candidate}");
+                        bound = Some(l);
+                        break;
+                    }
+                    Err(_) => continue,
+                }
+            }
+            bound.unwrap_or_else(|| {
+                panic!(
+                    "failed to bind port {port} or any of the next {MAX_FALLBACKS} ports — free the port (netstat -ano | findstr {port}) or pick another: PORT=<port> cargo run -p server"
+                )
+            })
+        }
+        Err(e) => panic!("failed to bind port {port}: {e}"),
+    };
+
+    let bound_addr = listener.local_addr().expect("listener has a local address");
+    if bound_addr.port() != port {
+        eprintln!(
+            "NOTE: serving on http://{bound_addr} instead of http://127.0.0.1:{port} — update the browser URL"
+        );
+    }
+    eprintln!("SIH26141 API server listening on http://{bound_addr}");
     eprintln!("Frontend: {}", static_dir.display());
 
     axum::serve(listener, app).await.expect("server error");

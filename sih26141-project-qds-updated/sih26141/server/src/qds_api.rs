@@ -233,7 +233,9 @@ pub async fn qds_attacks(
         let last_opt = holder.last_signature.lock().unwrap().clone();
         last_opt
     };
-    let (genuine, teleports, message) = last.ok_or_else(|| {
+    // `teleports` is no longer needed here: channel tampering now disturbs
+    // the genuine signature bits directly (see attempt_channel_tampering).
+    let (genuine, _teleports, message) = last.ok_or_else(|| {
         bad_request("no signature on file yet — sign a message first (POST /api/qds/sign)".into())
     })?;
 
