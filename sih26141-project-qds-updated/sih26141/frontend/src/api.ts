@@ -175,9 +175,68 @@ export const qdsApi = {
       signature_hex: signatureHex,
       nonce,
     }),
-  attacks: (): Promise<QdsOutcome[]> => fetch(`${BASE}/api/qds/attacks`).then((r) => r.json()),
+  attacks: (tamperFraction?: number): Promise<QdsOutcome[]> => {
+    const q = tamperFraction !== undefined ? `?tamper_fraction=${tamperFraction}` : ''
+    return fetch(`${BASE}/api/qds/attacks${q}`).then((r) => r.json())
+  },
   forgeryAnalysis: (): Promise<ForgeryAnalysis> =>
     fetch(`${BASE}/api/qds/forgery-analysis`).then((r) => r.json()),
+  metrics: (trials?: number, seed?: number): Promise<MetricsReport> => {
+    const params = new URLSearchParams()
+    if (trials !== undefined) params.set('trials', String(trials))
+    if (seed !== undefined) params.set('seed', String(seed))
+    const q = params.toString() ? `?${params.toString()}` : ''
+    return fetch(`${BASE}/api/qds/metrics${q}`).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      return r.json()
+    })
+  },
   events: (): Promise<{ events: QdsEventRow[] }> =>
     fetch(`${BASE}/api/qds/events`).then((r) => r.json()),
+}
+
+// ---------------- Performance evaluation (Lap 2 deliverable) ----------------
+
+export interface ConfusionCounts {
+  true_negatives: number
+  false_positives: number
+  true_positives: number
+  false_negatives: number
+}
+
+export interface TimingStats {
+  samples: number
+  mean_sign_us: number
+  mean_verify_us: number
+  mean_attack_us: number
+  mean_setup_us: number
+}
+
+export interface TeleportMetrics {
+  trials: number
+  qubit_count: number
+  lambda: number
+  confusion: ConfusionCounts
+  empirical_forgery_probability: number
+  theoretical_forgery_probability: number
+  timing: TimingStats
+}
+
+export interface ClassDetection {
+  detected: number
+  missed: number
+}
+
+export interface SixStateMetrics {
+  trials: number
+  n_pulses: number
+  confusion: ConfusionCounts
+  detection_by_class: Record<string, ClassDetection>
+  timing: TimingStats
+}
+
+export interface MetricsReport {
+  teleport: TeleportMetrics
+  six_state: SixStateMetrics
+  notes: string[]
 }

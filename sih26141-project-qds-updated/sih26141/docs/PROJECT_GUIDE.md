@@ -579,12 +579,42 @@ label:
   message. Fails C1 wherever SHA-256(m′)ᵢ ≠ SHA-256(m)ᵢ (~half of positions).
 - `attempt_replay` — verbatim re-presentation. Fails nonce check before
   statistics.
-- `attempt_channel_tampering(teleports, f, …)` — genuine bits, but the
-  fraction f of in-flight qubits disturbed (Eve flips one Bell bit per
-  disturbed position). Mismatches scale ∝ f ⇒ exceeds c2 for f = 0.5.
+- `attempt_channel_tampering(genuine, f, …)` — the genuine signature bits,
+  but the fraction f of in-flight qubits disturbed (each disturbed position
+  has one published bit flipped). Mismatches scale ∝ f; exceeds c2 for
+  f = 0.5. The tamper fraction is caller-controlled (API: `tamper_fraction`
+  query parameter, default 50%).
+- `attempt_unauthorized_verification(genuine, …)` — a party without Trent's
+  key material attempts verification. The attempt itself is flagged as its
+  own threat class ("unauthorized verification attempts" is one of the five
+  threat classes in the problem statement); the captured signature also fails
+  statistics on any fresh nonce.
 
-**Tests** (`qds/tests/qds_tests.rs`, 11 passing) — deterministic acceptance
-of genuine signatures, tampered-message rejection, all four attacks rejected,
+**The six-state module** (`qds/src/six_state.rs`) — the second,
+literature-faithful QDS scheme (Weng et al. 2021): Alice prepares six-state
+Pauli eigenstates, verifiers measure in random Pauli bases, conclusive
+(click) results encode logic bits via the orthogonal-partner rule, and the
+*mismatching rate of conclusive results* drives the threshold decision —
+the exact estimation method of the multiparty QDS paper. The ideal click
+rate 1/6 emerges naturally from the encoding and is assertable in tests.
+A threshold-rule classifier (`classify`) attributes observed evidence to
+forgery / impersonation / replay / channel tampering / unauthorized
+verification — deterministic and explainable, no AI/ML.
+
+**The noisy-channel module** (`qds/src/noisy.rs`) — sizes the GC01 dual
+thresholds for real channels: c1 = noise floor + Hoeffding slack √(ln(2/δ)/2n),
+c2 = c1 + gray-zone width. Bridges the QKD layer's finite-key statistics
+into signature verification.
+
+**The metrics module** (`qds/src/metrics.rs`) — the repeatable evaluation
+engine (Lap 2 "observable security metrics"): confusion-matrix accuracy,
+detection rate, false positives/negatives, empirical vs theoretical forgery
+probability, and per-operation wall-clock timings, for both QDS schemes,
+all deterministic under a seed. Exposed at `/api/qds/metrics` and visualized
+in the dashboard's "Performance evaluation" panel.
+
+**Tests** (`qds/tests/qds_tests.rs`, 16 passing) — deterministic acceptance
+of genuine signatures, tampered-message rejection, all five attacks rejected,
 nonce-failure semantics, 1-ACC verdict, 0-ACC gray zone, transferability
 consensus (genuine: agrees; forged: REJ), forgery-probability MC ≈ theory.
 
@@ -617,8 +647,9 @@ Axum HTTP + SSE (`server/src/main.rs`, `qds_api.rs`, `qds_state.rs`).
 | `/api/qds/setup` | POST | regenerate Trent key material (qubit_count, λ) |
 | `/api/qds/sign` | POST | sign via teleportation; Bob verifies on delivery (consumes nonce); returns correction-bit hex + teleport trace |
 | `/api/qds/verify` | POST | manual (message, signature_hex, nonce) check |
-| `/api/qds/attacks` | GET | run all 4 attacks, return verdicts + Charlie consensus |
+| `/api/qds/attacks` | GET | run all 5 attacks (optional `tamper_fraction` query param, default 0.5), return verdicts + Charlie consensus |
 | `/api/qds/forgery-analysis` | GET | MC vs theory at (8,1) over 20k trials + λ-scaling points |
+| `/api/qds/metrics` | GET | repeatable performance evaluation (`trials`, `seed` params): accuracy, detection rates, false alarms, forgery probability, timings |
 | `/api/qds/events` | GET | recent security events |
 
 **Engineering details worth citing:**
@@ -684,9 +715,11 @@ React 19 + TS + Recharts, hand-rolled dark SOC theme (`index.css`), Vite.
     GET  /api/qds/attacks ┃ forgery: guessed bits          → REJ (stats)
                           ┃ impersonation: transplant      → REJ (C1 fails)
                           ┃ replay: nonce reuse            → REJ (nonce)
-                          ┃ tampering: 50% qubits          → REJ (stats)
+                          ┃ tampering: f-fraction qubits   → REJ (stats)
+                          ┃ unauthorized: no key material  → FLAGGED
                           ┃ + Charlie consensus on each
  ④ GET /api/qds/forgery-analysis → MC(20k) ≈ 4^(−qλ), λ-scaling chart
+ ⑤ GET /api/qds/metrics     → accuracy, detection rate, false alarms, timings
  every event ──▶ qds_events.jsonl (persistent audit log)
 ```
 
@@ -697,7 +730,7 @@ React 19 + TS + Recharts, hand-rolled dark SOC theme (`index.css`), Vite.
 ```bash
 # Toolchain (this machine): windows-gnu Rust, Node 24 — see .freebuff/run.md
 cd sih26141
-cargo test --workspace          # 17 tests, all passing
+cargo test --workspace          # 35 tests, all passing
 cargo run -p main_app           # 2-second CLI demo of the QKD pipeline
 
 # Dashboard (single port serves API + UI):
@@ -705,16 +738,27 @@ cd frontend && npm install && npm run build && cd ..
 PORT=8080 cargo run -p server   # http://127.0.0.1:8080
 ```
 
-**Test inventory (17):**
+**Test inventory (35):**
 - `quantum` (3): f/3 law at ratios 0.0 / 1.0 / 0.3.
 - `tests/integration_tests.rs` (3): end-to-end secure pipeline (keys equal,
   verdict authentic, HMAC verifies + tamper fails), attack detection, input
   validation guards.
-- `qds/tests/qds_tests.rs` (11): deterministic 1-ACC acceptance, tampered
-  message rejected, forgery rejected, impersonation rejected, replay rejected,
-  channel tampering rejected, MC forgery ≈ ¼ at (1,1), nonce kept on failure,
-  genuine ⇒ 1-ACC verdict, gray-zone ⇒ 0-ACC not transferable,
-  transferability consensus.
+- `qds/src/six_state` (6): honest delivery deterministically accepted, both
+  message values verify, forged string rejected near the ½ guessing floor,
+  impersonation transplant rejected, 30% tampering above the noise floor and
+  classified as channel tampering, unauthorized verifier flagged.
+- `qds/src/noisy` (5): noiseless ⇒ 1-ACC, noise-within-floor tolerated,
+  attack-level mismatch flagged, gray-zone neither clean nor flagged, Hoeffding
+  slack shrinks with n.
+- `qds/src/metrics` (2): evaluation accurate (accuracy > 0.99, zero false
+  alarms) and deterministic under a fixed seed; timings sub-50 ms.
+- `qds/tests/qds_tests.rs` (16): the original 11 (deterministic 1-ACC
+  acceptance, tampered message rejected, forgery/impersonation/replay/channel
+  tampering rejected, MC forgery ≈ ¼ at (1,1), nonce kept on failure, genuine
+  ⇒ 1-ACC verdict, gray-zone ⇒ 0-ACC not transferable, transferability
+  consensus) plus unauthorized-verification attempt flagged, tampering
+  scales with fraction, noisy thresholds statistically sized, six-state
+  scheme rejects all attacks, performance evaluation meets Lap 2 targets.
 
 **Manual verification performed:** full dashboard run (verdicts, chart
 convergence, sweep threshold crossing), QDS lab flow end-to-end (keys → sign

@@ -22,7 +22,11 @@ use rand::Rng;
 use sha2::{Digest, Sha256};
 
 pub mod attacks;
+pub mod metrics;
+pub mod noisy;
+pub mod six_state;
 pub use attacks::{AttackAttempt, AttackKind};
+pub use six_state::{SixStateAttackKind, SixStateSignature, SixStateVerification};
 
 // ---------------------------------------------------------------------------
 // Pauli algebra

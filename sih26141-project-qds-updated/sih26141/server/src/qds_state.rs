@@ -157,6 +157,7 @@ pub fn run_attack(
         qds::AttackKind::Impersonation => "impersonation",
         qds::AttackKind::Replay => "replay",
         qds::AttackKind::ChannelTampering => "channel_tampering",
+        qds::AttackKind::UnauthorizedVerification => "unauthorized_verification",
     };
     run_verify(state, "attack", kind_str, message, &attempt.signature, attempt.description)
 }

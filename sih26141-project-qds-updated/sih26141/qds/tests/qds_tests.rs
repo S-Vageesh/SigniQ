@@ -1,7 +1,10 @@
-use qds::attacks::{attempt_channel_tampering, attempt_forgery, attempt_impersonation, attempt_replay};
+use qds::attacks::{
+    attempt_channel_tampering, attempt_forgery, attempt_impersonation, attempt_replay,
+    attempt_unauthorized_verification,
+};
 use qds::{
-    estimate_forgery_probability, sign, theory_forgery_probability, verify, verify_transferability,
-    Verdict, Trent,
+    estimate_forgery_probability, metrics, sign, theory_forgery_probability, verify,
+    verify_transferability, Verdict, Trent,
 };
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -70,10 +73,10 @@ fn replay_attack_is_rejected() {
 fn channel_tampering_is_detected_proportionally() {
     let mut rng = StdRng::seed_from_u64(1006);
     let mut trent = Trent::setup(QUBITS, LAMBDA, &mut rng);
-    let (_sig, teleports) = sign(MESSAGE, &mut trent, &mut rng);
+    let (sig, _teleports) = sign(MESSAGE, &mut trent, &mut rng);
 
     let attempt =
-        attempt_channel_tampering(&teleports, 0.5, MESSAGE, &trent, &mut rng);
+        attempt_channel_tampering(&sig, 0.5, MESSAGE, &trent, &mut rng);
     let mut sig = attempt.signature.clone();
     sig.nonce = trent.issue_nonce(); // tamper flow uses its own fresh nonce
     let report = verify(MESSAGE, &sig, &mut trent, 0.0);
@@ -135,6 +138,124 @@ fn forged_signature_in_gray_zone_yields_0acc_not_rej_boundary() {
     assert_eq!(report.verdict, Verdict::Acc0, "few mismatches => 0-ACC gray zone");
     assert!(report.accepted, "0-ACC is still locally accepted");
     assert!(!report.transferable(), "0-ACC must not be forwarded as trusted");
+}
+
+#[test]
+fn unauthorized_verification_attempt_is_flagged() {
+    let mut rng = StdRng::seed_from_u64(1012);
+    let mut trent = Trent::setup(QUBITS, LAMBDA, &mut rng);
+    let (genuine, _) = sign(MESSAGE, &mut trent, &mut rng);
+
+    // An unauthorized party replays a captured signature through a verbatim
+    // attempt — the attempt is its own threat class and is surfaced as such.
+    let attempt = attempt_unauthorized_verification(&genuine, MESSAGE, b"attacker payload");
+    assert_eq!(attempt.kind, qds::AttackKind::UnauthorizedVerification);
+    // The captured bits are unchanged, so statistics would fail on a fresh
+    // nonce for a different message (impersonation-equivalent):
+    let mut sig = attempt.signature.clone();
+    sig.nonce = trent.issue_nonce();
+    let report = verify(b"attacker payload", &sig, &mut trent, 0.0);
+    assert!(!report.accepted, "unauthorized re-presentation must be rejected");
+}
+
+#[test]
+fn channel_tampering_scales_with_fraction() {
+    let mut rng = StdRng::seed_from_u64(1013);
+    let mut trent = Trent::setup(QUBITS, LAMBDA, &mut rng);
+    let (genuine_sig, _teleports) = sign(MESSAGE, &mut trent, &mut rng);
+
+    // A mild 10% disturbance should produce a small but nonzero mismatch
+    // count; a 90% disturbance should mismatch most positions.
+    let mut count_mismatches = |fraction: f64| -> usize {
+        let attempt =
+            attempt_channel_tampering(&genuine_sig, fraction, MESSAGE, &trent, &mut rng);
+        let mut sig = attempt.signature;
+        sig.nonce = trent.issue_nonce();
+        verify(MESSAGE, &sig, &mut trent, 0.10).mismatches
+    };
+    let mild = count_mismatches(0.1);
+    let heavy = count_mismatches(0.9);
+    assert!(heavy > mild * 2, "mismatches must scale with tamper fraction ({mild} vs {heavy})");
+}
+
+#[test]
+fn noisy_channel_thresholds_are_statistically_sized() {
+    use qds::noisy::{assess_mismatch, hoeffding_slack};
+
+    // Clean-channel statistics always yield 1-ACC:
+    let a = assess_mismatch(0, 64, 0.0, 0.05, 0.05);
+    assert_eq!(a.verdict, Verdict::Acc1);
+
+    // Slack shrinks with sample size (Hoeffding):
+    assert!(hoeffding_slack(10_000, 0.05) < hoeffding_slack(50, 0.05));
+
+    // A 75% mismatch (guessed forgery) is always flagged:
+    let b = assess_mismatch(48, 64, 0.05, 0.05, 0.05);
+    assert_eq!(b.verdict, Verdict::Rej);
+    assert!(b.channel_flagged);
+}
+
+#[test]
+fn six_state_scheme_rejects_all_attacks() {
+    use qds::six_state as ss;
+    let mut rng = StdRng::seed_from_u64(1014);
+    let params = ss::SessionParams { n_pulses: 800, test_fraction: 0.25, basis_misalignment: 0.0 };
+    let thresholds = qds::Thresholds { c1: 0.10, c2: 0.25 };
+
+    let session = ss::build_session(params.clone(), 1, 1, 0.0, &mut rng);
+    let material = ss::VerifierMaterial::from_session(&session);
+
+    // Honest:
+    let sig = ss::sign_six_state(&session, 0);
+    let v_ok = ss::verify_six_state(&sig, &material, &session.session_commitment, thresholds);
+    assert_eq!(v_ok.verdict, Verdict::Acc1, "honest six-state signature must accept");
+
+    // Forgery:
+    let forged = ss::attempt_six_state_forgery(&session, 0, &mut rng);
+    let v_f = ss::verify_six_state(&forged, &material, &session.session_commitment, thresholds);
+    assert_eq!(v_f.verdict, Verdict::Rej);
+
+    // Impersonation (message transplant):
+    let transplant = ss::attempt_six_state_impersonation(&sig);
+    let v_i = ss::verify_six_state(&transplant, &material, &session.session_commitment, thresholds);
+    assert_eq!(v_i.verdict, Verdict::Rej);
+
+    // Channel tampering (30% disturbed):
+    let (t_session, t_sig) = ss::attempt_six_state_tampering(&params, 1, 2, 0.3, 0, &mut rng);
+    let t_material = ss::VerifierMaterial::from_session(&t_session);
+    let v_t = ss::verify_six_state(&t_sig, &t_material, &t_session.session_commitment, thresholds);
+    assert_eq!(v_t.verdict, Verdict::Rej);
+
+    // Unauthorized verifier:
+    let v_u = ss::verify_six_state(&sig, &ss::VerifierMaterial::default(), &session.session_commitment, thresholds);
+    assert_eq!(v_u.verdict, Verdict::Rej);
+    assert!(v_u.reason.contains("unauthorized"));
+}
+
+#[test]
+fn performance_evaluation_meets_lap2_targets() {
+    let report = metrics::evaluate(80, 90210);
+
+    // Verification accuracy (both schemes):
+    assert!(report.teleport.confusion.accuracy() > 0.99);
+    assert!(report.six_state.confusion.accuracy() > 0.99);
+
+    // False-alarm rate on legitimate signatures is zero:
+    assert_eq!(report.teleport.confusion.false_positive_rate(), 0.0);
+    assert_eq!(report.six_state.confusion.false_positive_rate(), 0.0);
+
+    // Detection rate over attacks is 1.0 in the noiseless simulation:
+    assert!(report.teleport.confusion.detection_rate() > 0.99);
+    assert!(report.six_state.confusion.detection_rate() > 0.99);
+
+    // Empirical forgery probability ~0 vs theory 4^-8:
+    assert!(report.teleport.empirical_forgery_probability < 0.02);
+    assert!((report.teleport.theoretical_forgery_probability - 4.0_f64.powi(-8)).abs() < 1e-12);
+
+    // Every attack class detected by the six-state layer:
+    for (class, d) in &report.six_state.detection_by_class {
+        assert!(d.rate() > 0.95, "class {class} detection rate too low");
+    }
 }
 
 #[test]
