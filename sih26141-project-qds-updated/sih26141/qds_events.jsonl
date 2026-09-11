@@ -10,3 +10,4 @@
 {"ts":"2026-09-11T22:38:16.456Z","kind":"setup","label":"key-generation","accepted":true,"detail":"Trent initialized 16 qubits x lambda=4; key commitment published"}
 {"ts":"2026-09-11T22:38:16.613Z","kind":"sign","label":"alice","accepted":true,"detail":"signed message (14 chars) with nonce 1; 128 signature bits"}
 {"ts":"2026-09-11T22:38:16.614Z","kind":"verify","label":"bob [verify]","accepted":true,"detail":"Acc1 — 0 mismatches across 64 positions — 1-ACC: valid and transferable — all measurement checks passed [Charlie consensus: true]"}
+{"ts":"2026-09-11T23:29:51.476Z","kind":"setup","label":"key-generation","accepted":true,"detail":"Trent initialized 16 qubits x lambda=4; key commitment published"}

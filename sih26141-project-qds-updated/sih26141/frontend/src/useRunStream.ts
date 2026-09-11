@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react'
 import type { RunEvent } from './api'
+import { base } from './api'
 
 /**
  * Subscribes to the backend SSE event stream. `onEvent` is kept in a ref so
- * the connection survives re-renders. Reconnects automatically on drop.
+ * the connection survives re-renders. Reconnects automatically on drop and
+ * re-reads the API base each attempt (covers port-fallback discovery).
  */
 export function useRunStream(onEvent: (ev: RunEvent) => void) {
   const handler = useRef(onEvent)
@@ -15,7 +17,7 @@ export function useRunStream(onEvent: (ev: RunEvent) => void) {
     let closed = false
 
     const connect = () => {
-      es = new EventSource('/api/events')
+      es = new EventSource(`${base()}/api/events`)
       es.onmessage = (msg) => {
         try {
           handler.current(JSON.parse(msg.data) as RunEvent)

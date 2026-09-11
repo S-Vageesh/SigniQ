@@ -80,6 +80,7 @@ cd frontend && npm run dev     # http://localhost:5173
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/api/health` | GET | Liveness probe |
+| `/api/server-info` | GET | Actual bound port (differs from the request only after a port fallback) |
 | `/api/run` | POST | QKD simulation run: `key_length`, `base_threshold`, `intercept_ratio` (optional), `message`, `seed`, `pace_ms` |
 | `/api/simulate` | POST | Sweep over `intercept_ratios` (up to 32 values) |
 | `/api/events` | GET | SSE stream: `progress` / `result` / `done` events |
@@ -96,6 +97,21 @@ curl -X POST localhost:8080/api/run \
   -H 'Content-Type: application/json' \
   -d '{"key_length": 3000, "seed": 42, "pace_ms": 0}'
 ```
+
+## Port fallback & dashboard discovery
+
+If the requested port (default 8080) is held by another process or blocked by a
+Windows reserved port range (os error 10013 — common with Apache/Hyper-V on
+Windows), the server falls back to the next ports (up to +10) instead of
+panicking, and:
+
+1. writes `frontend/dist/server-port.json` stating the actual port, and
+2. exposes it at `/api/server-info`.
+
+The dashboard auto-discovers this: when its same-origin health check fails it
+reads the manifest, then probes adjacent ports — the "API offline" pill turns
+green on its own within one poll (≤10 s). To free 8080 permanently, stop the
+Apache service (`services.msc`) or run on another port: `$env:PORT=8090`.
 
 ## What the simulation shows
 

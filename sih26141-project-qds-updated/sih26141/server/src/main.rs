@@ -73,6 +73,11 @@ struct AppState {
     qds: Mutex<QdsStateHolder>,
     /// Path of the persistent QDS security-event log (JSONL).
     qds_log_path: PathBuf,
+    /// The port the server actually bound (differs from the request only
+    /// after a port-fallback; the frontend discovers it via /api/server-info
+    /// and frontend/dist/server-port.json). Atomic because the listener is
+    /// bound after state construction.
+    bound_port: std::sync::atomic::AtomicU16,
 }
 
 #[derive(Debug, Deserialize)]
@@ -222,6 +227,14 @@ struct RunResponse {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+/// Which port the server actually bound (differs from the request only after
+/// a port-fallback). The frontend uses this to locate a fallback server.
+async fn server_info(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "port": state.bound_port.load(std::sync::atomic::Ordering::Relaxed)
+    }))
 }
 
 pub(crate) fn bad_request(msg: String) -> (StatusCode, Json<serde_json::Value>) {
@@ -400,6 +413,18 @@ async fn sse_handler(
 async fn main() {
     let (events_tx, _) = broadcast::channel(1024);
 
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(DEFAULT_PORT);
+
+    // Serve the built frontend when present (frontend/dist), else API-only.
+    let static_dir = std::env::var("FRONTEND_DIST")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../frontend/dist")
+        });
+
     // Persistent QDS security-event log next to the executable's workspace.
     let qds_log_path = std::env::var("QDS_EVENT_LOG")
         .map(PathBuf::from)
@@ -412,23 +437,19 @@ async fn main() {
         run_counter: AtomicU64::new(1),
         qds: Mutex::new(qds_state),
         qds_log_path,
+        // Patched once the listener is bound (fallback may change it).
+        bound_port: std::sync::atomic::AtomicU16::new(port),
     });
 
     let app = Router::new()
         .route("/api/health", get(health))
+        .route("/api/server-info", get(server_info))
         .route("/api/run", post(run_handler))
         .route("/api/simulate", post(simulate_handler))
         .route("/api/events", get(sse_handler))
         .merge(qds_router())
         .layer(CorsLayer::permissive())
-        .with_state(state);
-
-    // Serve the built frontend when present (frontend/dist), else API-only.
-    let static_dir = std::env::var("FRONTEND_DIST")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../frontend/dist")
-        });
+        .with_state(Arc::clone(&state));
 
     let app = if static_dir.join("index.html").exists() {
         app.fallback_service(
@@ -439,11 +460,6 @@ async fn main() {
         eprintln!("Note: no frontend build at {} — API-only mode.", static_dir.display());
         app
     };
-
-    let port: u16 = std::env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(DEFAULT_PORT);
 
     // Bind with a clear error message and, on Windows, a fallback: OS error
     // 10013 (PermissionDenied) happens when another process holds the port
@@ -480,10 +496,30 @@ async fn main() {
     };
 
     let bound_addr = listener.local_addr().expect("listener has a local address");
+    state.bound_port.store(bound_addr.port(), std::sync::atomic::Ordering::Relaxed);
     if bound_addr.port() != port {
-        eprintln!(
-            "NOTE: serving on http://{bound_addr} instead of http://127.0.0.1:{port} — update the browser URL"
-        );
+        // Publish the actual bound port so the dashboard can find the API
+        // even after a fallback: the frontend probes /server-port.json
+        // (served as a static asset from frontend/dist) when its same-origin
+        // health check fails.
+        let manifest = serde_json::json!({
+            "requested_port": port,
+            "actual_port": bound_addr.port(),
+            "reason": "requested port unavailable (held by another process or blocked by a Windows reserved port range)"
+        });
+        let port_file = static_dir.join("server-port.json");
+        match std::fs::write(&port_file, manifest.to_string()) {
+            Ok(()) => eprintln!(
+                "NOTE: serving on http://{bound_addr} instead of http://127.0.0.1:{port} — wrote {}",
+                port_file.display()
+            ),
+            Err(e) => eprintln!(
+                "NOTE: serving on http://{bound_addr}; could not write port manifest ({e}) — open this URL manually"
+            ),
+        }
+    } else {
+        // Clean up any stale manifest from a previous fallback run.
+        let _ = std::fs::remove_file(static_dir.join("server-port.json"));
     }
     eprintln!("SIH26141 API server listening on http://{bound_addr}");
     eprintln!("Frontend: {}", static_dir.display());

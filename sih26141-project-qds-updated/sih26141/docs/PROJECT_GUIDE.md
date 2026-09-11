@@ -636,6 +636,7 @@ Axum HTTP + SSE (`server/src/main.rs`, `qds_api.rs`, `qds_state.rs`).
 | Route | Method | Purpose |
 |---|---|---|
 | `/api/health` | GET | liveness (dashboard pill) |
+| `/api/server-info` | GET | actual bound port — published for the dashboard's fallback discovery |
 | `/api/run` | POST | full run: key_length, base_threshold, intercept_ratio?, message, seed, pace_ms → two scenarios (secure + attack) or one custom ratio |
 | `/api/simulate` | POST | sweep ≤32 intercept ratios |
 | `/api/events` | GET | SSE progress/result/done stream (replays last run; keep-alive 15 s) |
@@ -653,6 +654,11 @@ Axum HTTP + SSE (`server/src/main.rs`, `qds_api.rs`, `qds_state.rs`).
 | `/api/qds/events` | GET | recent security events |
 
 **Engineering details worth citing:**
+- **Port fallback + dashboard auto-discovery**: if the requested port is held
+  (os error 10013 — Apache, Hyper-V reserved ranges), the server binds the next
+  ports, writes `frontend/dist/server-port.json` and `/api/server-info`; the
+  dashboard's health poll falls back to the manifest and adjacent-port probing,
+  so the pill turns green without manual URL surgery.
 - CPU-bound simulation runs inside `spawn_blocking` — never blocks the async
   reactor; other requests stay live during a run.
 - Live QKD progress: per-batch `Progress` SSE events carry running QBER *and*
