@@ -490,6 +490,55 @@ body {
 
 .qds-forgery { margin-top: 6px; }
 
+.qds-tamper-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.qds-metrics { margin-top: 10px; }
+
+.qds-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.qds-metric-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.qds-metric-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.qds-metric-rows div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  padding: 2px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+}
+
+.qds-metric-rows div:last-child { border-bottom: none; }
+
+.qds-metric-rows .k { color: var(--text-faint); }
+
+.qds-metric-rows b { color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }
+
 .refs-block {
   margin-top: 14px;
   font-size: 12px;

@@ -51,10 +51,20 @@ export interface DoneEvent {
 
 export type RunEvent = ProgressEvent | ResultEvent | DoneEvent
 
-const BASE = import.meta.env.DEV ? '' : window.location.origin
+// Same-origin by default; discoverApiBase() can retarget all calls to a
+// fallback server port at runtime (see apiBase()).
+let BASE_OVERRIDE = ''
+export function setApiBase(newBase: string) {
+  BASE_OVERRIDE = newBase
+}
+
+export function base(): string {
+  if (BASE_OVERRIDE) return BASE_OVERRIDE
+  return import.meta.env.DEV ? '' : window.location.origin
+}
 
 async function jsonFetch<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(`${base()}${url}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -93,10 +103,57 @@ export function runSweep(params: {
 }
 
 export function healthCheck(): Promise<string> {
-  return fetch(`${BASE}/api/health`).then((r) => {
+  return fetch(`${base()}/api/health`).then((r) => {
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     return r.text()
   })
+}
+
+/**
+ * Locate the API when the same-origin health check fails.
+ *
+ * Discovery order:
+ * 1. same-origin /api/health (server-served dashboard, or vite proxy in dev)
+ * 2. /server-port.json static manifest — the server writes it into the
+ *    frontend dist when a port fallback moved it off the requested port
+ * 3. adjacent ports 8081..8090 — direct probe (works when the dashboard is
+ *    opened via vite dev or a file copy where the manifest is stale)
+ *
+ * Resolves with the API base URL ("" for same-origin), rejects if none respond.
+ */
+export async function discoverApiBase(): Promise<string> {
+  try {
+    await healthCheck()
+    return ''
+  } catch {
+    /* fall through to discovery */
+  }
+
+  // 2. static port manifest written by the server on fallback
+  try {
+    const res = await fetch('/server-port.json', { cache: 'no-store' })
+    if (res.ok) {
+      const manifest = (await res.json()) as { actual_port?: number }
+      if (manifest.actual_port) {
+        const base = `http://127.0.0.1:${manifest.actual_port}`
+        const probe = await fetch(`${base}/api/health`)
+        if (probe.ok) return base
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+
+  // 3. adjacent-port probe
+  for (let p = 8081; p <= 8090; p++) {
+    try {
+      const probe = await fetch(`http://127.0.0.1:${p}/api/health`)
+      if (probe.ok) return `http://127.0.0.1:${p}`
+    } catch {
+      /* keep probing */
+    }
+  }
+  throw new Error('API not found on same origin, port manifest, or ports 8081-8090')
 }
 
 // ---------------- QDS Signature Lab ----------------
@@ -175,9 +232,68 @@ export const qdsApi = {
       signature_hex: signatureHex,
       nonce,
     }),
-  attacks: (): Promise<QdsOutcome[]> => fetch(`${BASE}/api/qds/attacks`).then((r) => r.json()),
+  attacks: (tamperFraction?: number): Promise<QdsOutcome[]> => {
+    const q = tamperFraction !== undefined ? `?tamper_fraction=${tamperFraction}` : ''
+    return fetch(`${base()}/api/qds/attacks${q}`).then((r) => r.json())
+  },
   forgeryAnalysis: (): Promise<ForgeryAnalysis> =>
-    fetch(`${BASE}/api/qds/forgery-analysis`).then((r) => r.json()),
+    fetch(`${base()}/api/qds/forgery-analysis`).then((r) => r.json()),
+  metrics: (trials?: number, seed?: number): Promise<MetricsReport> => {
+    const params = new URLSearchParams()
+    if (trials !== undefined) params.set('trials', String(trials))
+    if (seed !== undefined) params.set('seed', String(seed))
+    const q = params.toString() ? `?${params.toString()}` : ''
+    return fetch(`${base()}/api/qds/metrics${q}`).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      return r.json()
+    })
+  },
   events: (): Promise<{ events: QdsEventRow[] }> =>
-    fetch(`${BASE}/api/qds/events`).then((r) => r.json()),
+    fetch(`${base()}/api/qds/events`).then((r) => r.json()),
+}
+
+// ---------------- Performance evaluation (Lap 2 deliverable) ----------------
+
+export interface ConfusionCounts {
+  true_negatives: number
+  false_positives: number
+  true_positives: number
+  false_negatives: number
+}
+
+export interface TimingStats {
+  samples: number
+  mean_sign_us: number
+  mean_verify_us: number
+  mean_attack_us: number
+  mean_setup_us: number
+}
+
+export interface TeleportMetrics {
+  trials: number
+  qubit_count: number
+  lambda: number
+  confusion: ConfusionCounts
+  empirical_forgery_probability: number
+  theoretical_forgery_probability: number
+  timing: TimingStats
+}
+
+export interface ClassDetection {
+  detected: number
+  missed: number
+}
+
+export interface SixStateMetrics {
+  trials: number
+  n_pulses: number
+  confusion: ConfusionCounts
+  detection_by_class: Record<string, ClassDetection>
+  timing: TimingStats
+}
+
+export interface MetricsReport {
+  teleport: TeleportMetrics
+  six_state: SixStateMetrics
+  notes: string[]
 }

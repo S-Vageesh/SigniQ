@@ -261,6 +261,37 @@ signatures" (arXiv:2104.12059).** The modern practical protocol. From it we adop
   simplified to the two-verifier (Bob authenticator + Charlie verifier)
   transferability check appropriate for the three-party setting.
 
+### 10.1 The six-state scheme as a second full implementation (`qds/src/six_state.rs`)
+
+Beyond borrowing the state space, the framework implements Weng et al.'s
+**key generation → estimation → messaging** protocol end to end as a second,
+independent QDS scheme alongside the teleportation pipeline:
+
+- **Key generation.** For each message value $m \in \{0,1\}$, Alice prepares
+  $n$ six-state qubits, assigns each to one of the 12 encoding-set pairs
+  (the set always contains her sent state), and recipients measure in
+  uniformly random Pauli bases. The **conclusive-result rule**: an outcome
+  equal to the *orthogonal partner* of a set member (same basis, opposite
+  sign) is conclusive, with logic bit = the other member's bit. The ideal
+  conclusive (click) rate $P_c = 1/6$ emerges naturally from the encoding —
+  exactly the value the paper's protocol requires recipients to verify
+  (`conclusive_bit`, `build_session`; test-asserted).
+- **Estimation.** Test-bit sampling estimates the mismatching rate of
+  conclusive results between Alice's string and each verifier's string
+  (`estimate_mismatch`).
+- **Messaging.** Alice publishes her untested string as the signature; the
+  verifier's decision is the dual-threshold rule on the conclusive-mismatch
+  rate ($c_1/c_2$, 1-ACC / 0-ACC / REJ) — `sign_six_state` /
+  `verify_six_state`.
+- **Detection layer.** The same conclusive-string statistics expose all five
+  threat classes of the problem statement: a guessed string mismatches near
+  the ½ floor, a transplanted string mismatches against the wrong message
+  value, tampering raises the rate ∝ disturbance fraction, and a verifier
+  without conclusive key material cannot produce any trusted verdict. The
+  threshold-rule classifier `classify` attributes evidence to
+  forgery / impersonation / replay / channel tampering / unauthorized
+  verification — deterministic and explainable, no AI/ML.
+
 **What is intentionally simplified** (and flagged as such): quantum memory,
 weak coherent-state sources with decoy intensities, post-matching efficiency
 techniques, and the multiparty (>3 participants) scaling of Weng et al. The

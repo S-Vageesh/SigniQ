@@ -1,0 +1,14 @@
+C:\Users\svage\SigniQ\sih26141-project-qds-updated\sih26141\target\debug\deps\serde-e8d07976bc1a8730.d: C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs C:\Users\svage\SigniQ\sih26141-project-qds-updated\sih26141\target\debug\build\serde-3d9793cf71552ad4\out/private.rs
+
+C:\Users\svage\SigniQ\sih26141-project-qds-updated\sih26141\target\debug\deps\libserde-e8d07976bc1a8730.rlib: C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs C:\Users\svage\SigniQ\sih26141-project-qds-updated\sih26141\target\debug\build\serde-3d9793cf71552ad4\out/private.rs
+
+C:\Users\svage\SigniQ\sih26141-project-qds-updated\sih26141\target\debug\deps\libserde-e8d07976bc1a8730.rmeta: C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs C:\Users\svage\SigniQ\sih26141-project-qds-updated\sih26141\target\debug\build\serde-3d9793cf71552ad4\out/private.rs
+
+C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs:
+C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs:
+C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs:
+C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs:
+C:\Users\svage\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs:
+C:\Users\svage\SigniQ\sih26141-project-qds-updated\sih26141\target\debug\build\serde-3d9793cf71552ad4\out/private.rs:
+
+# env-dep:OUT_DIR=C:\\Users\\svage\\SigniQ\\sih26141-project-qds-updated\\sih26141\\target\\debug\\build\\serde-3d9793cf71552ad4\\out

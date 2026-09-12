@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { qdsApi } from '../api'
-import type { ForgeryAnalysis, QdsOutcome, QdsSetupResponse, QdsSignResponse } from '../api'
+import type { ForgeryAnalysis, MetricsReport, QdsOutcome, QdsSetupResponse, QdsSignResponse } from '../api'
 
 const ATTACK_LABELS: Record<string, string> = {
   forgery: 'Forgery (guessed Bell outcomes)',
   impersonation: 'Impersonation (signature transplant)',
   replay: 'Replay (nonce reuse)',
-  channel_tampering: 'Channel tampering (50% qubits disturbed)',
+  channel_tampering: 'Channel tampering (qubits disturbed in flight)',
+  unauthorized_verification: 'Unauthorized verification (no key material)',
 }
 
 function verdictLabel(v: 'acc1' | 'acc0' | 'rej'): string {
@@ -21,13 +22,31 @@ function verdictLabel(v: 'acc1' | 'acc0' | 'rej'): string {
   }
 }
 
+function fmtUs(us: number): string {
+  if (us < 1) return `${(us * 1000).toFixed(0)} ns`
+  if (us < 1000) return `${us.toFixed(1)} µs`
+  return `${(us / 1000).toFixed(2)} ms`
+}
+
+function accuracyOf(c: { true_negatives: number; false_positives: number; true_positives: number; false_negatives: number }): number {
+  const total = c.true_negatives + c.false_positives + c.true_positives + c.false_negatives
+  return total === 0 ? 0 : (c.true_negatives + c.true_positives) / total
+}
+
+function detectionRateOf(c: { true_positives: number; false_negatives: number }): number {
+  const total = c.true_positives + c.false_negatives
+  return total === 0 ? 0 : c.true_positives / total
+}
+
 export function QdsLab() {
   const [message, setMessage] = useState('Transfer 100 QCO to account #8841')
   const [keyInfo, setKeyInfo] = useState<QdsSetupResponse | null>(null)
   const [signInfo, setSignInfo] = useState<QdsSignResponse | null>(null)
   const [attackResults, setAttackResults] = useState<QdsOutcome[]>([])
   const [forgery, setForgery] = useState<ForgeryAnalysis | null>(null)
-  const [busy, setBusy] = useState<'key' | 'sign' | 'attacks' | 'forgery' | null>(null)
+  const [metrics, setMetrics] = useState<MetricsReport | null>(null)
+  const [tamperFraction, setTamperFraction] = useState(0.5)
+  const [busy, setBusy] = useState<'key' | 'sign' | 'attacks' | 'forgery' | 'metrics' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const initKeys = async () => {
@@ -63,7 +82,19 @@ export function QdsLab() {
     setBusy('attacks')
     setError(null)
     try {
-      setAttackResults(await qdsApi.attacks())
+      setAttackResults(await qdsApi.attacks(tamperFraction))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doMetrics = async () => {
+    setBusy('metrics')
+    setError(null)
+    try {
+      setMetrics(await qdsApi.metrics(200, 42))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -171,8 +202,21 @@ export function QdsLab() {
             <span className="k">Signature (correction bits):</span>
             <code>{signInfo.signature_hex.slice(0, 64)}…</code>
           </div>
+          <div className="qds-tamper-control">
+            <span className="k">
+              Tamper fraction <b>{(tamperFraction * 100).toFixed(0)}%</b> of qubits
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={tamperFraction}
+              onChange={(e) => setTamperFraction(Number(e.target.value))}
+            />
+          </div>
           <button className="btn btn-primary" onClick={doAttacks} disabled={busy !== null}>
-            {busy === 'attacks' ? 'Attacking…' : '3 · Launch all 4 attacks'}
+            {busy === 'attacks' ? 'Attacking…' : '3 · Launch all 5 attacks'}
           </button>
         </div>
       )}
@@ -244,6 +288,50 @@ export function QdsLab() {
           </>
         ) : (
           <div className="empty-state">Run the analysis to see forgery probabilities scale with λ.</div>
+        )}
+      </div>
+
+      <div className="qds-metrics">
+        <div className="panel-title-row">
+          <div className="panel-title">Performance evaluation (Lap 2 metrics)</div>
+          <button className="btn btn-ghost" onClick={doMetrics} disabled={busy !== null}>
+            {busy === 'metrics' ? 'Evaluating…' : '5 · Run evaluation'}
+          </button>
+        </div>
+        {metrics ? (
+          <>
+            <p className="panel-hint">
+              Repeatable evaluation (seeded, deterministic): verification accuracy, detection
+              rate, false alarms, forgery probability, and wall-clock cost per operation for
+              both QDS schemes. No AI/ML — every decision is a threshold rule.
+            </p>
+            <div className="qds-metrics-grid">
+              <div className="qds-metric-card">
+                <div className="qds-metric-title">Teleportation QDS</div>
+                <div className="qds-metric-rows">
+                  <div><span className="k">Verification accuracy</span><b>{(accuracyOf(metrics.teleport.confusion) * 100).toFixed(2)}%</b></div>
+                  <div><span className="k">Detection rate</span><b>{(detectionRateOf(metrics.teleport.confusion) * 100).toFixed(2)}%</b></div>
+                  <div><span className="k">False positives</span><b>{metrics.teleport.confusion.false_positives}</b></div>
+                  <div><span className="k">False negatives</span><b>{metrics.teleport.confusion.false_negatives}</b></div>
+                  <div><span className="k">Forgery probability (MC vs theory)</span><b>{metrics.teleport.empirical_forgery_probability.toExponential(1)} / {metrics.teleport.theoretical_forgery_probability.toExponential(1)}</b></div>
+                  <div><span className="k">sign / verify</span><b>{fmtUs(metrics.teleport.timing.mean_sign_us)} / {fmtUs(metrics.teleport.timing.mean_verify_us)}</b></div>
+                </div>
+              </div>
+              <div className="qds-metric-card">
+                <div className="qds-metric-title">Six-state QDS (Weng et al.)</div>
+                <div className="qds-metric-rows">
+                  <div><span className="k">Verification accuracy</span><b>{(accuracyOf(metrics.six_state.confusion) * 100).toFixed(2)}%</b></div>
+                  <div><span className="k">Detection rate</span><b>{(detectionRateOf(metrics.six_state.confusion) * 100).toFixed(2)}%</b></div>
+                  <div><span className="k">False positives</span><b>{metrics.six_state.confusion.false_positives}</b></div>
+                  <div><span className="k">False negatives</span><b>{metrics.six_state.confusion.false_negatives}</b></div>
+                  <div><span className="k">Per-class detection</span><b>{Object.entries(metrics.six_state.detection_by_class).map(([k, v]) => `${k} ${(v.detected / Math.max(1, v.detected + v.missed) * 100).toFixed(0)}%`).join(' · ')}</b></div>
+                  <div><span className="k">sign / verify</span><b>{fmtUs(metrics.six_state.timing.mean_sign_us)} / {fmtUs(metrics.six_state.timing.mean_verify_us)}</b></div>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="empty-state">Run the evaluation to measure accuracy, detection rates, false alarms and computational cost.</div>
         )}
       </div>
 

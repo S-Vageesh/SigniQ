@@ -13,6 +13,7 @@ use std::sync::Mutex;
 
 use qds::attacks::{
     attempt_channel_tampering, attempt_forgery, attempt_impersonation, attempt_replay,
+    attempt_unauthorized_verification,
 };
 
 /// Wrapper stored in AppState (avoids generic-state plumbing in handlers).
@@ -222,18 +223,29 @@ pub async fn qds_verify(
     )))
 }
 
-/// Runs all four attacks against the last genuine signature.
+/// Runs all five attacks against the last genuine signature.
 pub async fn qds_attacks(
     State(state): State<std::sync::Arc<AppState>>,
+    raw: axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Vec<QdsOutcome>>, AppError> {
     let last = {
         let holder = state.qds.lock().unwrap();
         let last_opt = holder.last_signature.lock().unwrap().clone();
         last_opt
     };
-    let (genuine, teleports, message) = last.ok_or_else(|| {
+    // `teleports` is no longer needed here: channel tampering now disturbs
+    // the genuine signature bits directly (see attempt_channel_tampering).
+    let (genuine, _teleports, message) = last.ok_or_else(|| {
         bad_request("no signature on file yet — sign a message first (POST /api/qds/sign)".into())
     })?;
+
+    // Optional tamper-fraction control for the channel-tampering scenario
+    // (?tamper_fraction=0.5 default; 0.0–1.0).
+    let tamper_fraction = raw
+        .get("tamper_fraction")
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(qds::attacks::DEFAULT_TAMPER_FRACTION)
+        .clamp(0.0, 1.0);
 
     let target: &[u8] = b"FORGED: attacker-chosen payload";
     let message_bytes = message.as_bytes();
@@ -245,14 +257,16 @@ pub async fn qds_attacks(
         let impersonation = attempt_impersonation(&genuine, &message_bytes, target);
         let replay = attempt_replay(&genuine, message_bytes);
         let tamper = attempt_channel_tampering(
-            &teleports,
-            0.5,
+            &genuine,
+            tamper_fraction,
             message_bytes,
             &holder.inner.trent.lock().unwrap(),
             &mut rng,
         );
+        let unauthorized =
+            attempt_unauthorized_verification(&genuine, message_bytes, target);
 
-        let mut outcomes = Vec::with_capacity(4);
+        let mut outcomes = Vec::with_capacity(5);
         outcomes.push(run_attack(&holder.inner, forgery, target));
         outcomes.push(run_attack(&holder.inner, impersonation, target));
         outcomes.push(run_attack(&holder.inner, replay, message_bytes));
@@ -267,8 +281,19 @@ pub async fn qds_attacks(
             "channel_tampering",
             message_bytes,
             &sig,
-            tamper.description,
+            format!("{} ({:.0}% fraction)", tamper.description, tamper_fraction * 100.0),
         ));
+
+        // Unauthorized verification: flagged as its own threat class even
+        // though the captured signature itself would fail statistics anyway.
+        let mut unauthorized_sig = unauthorized.signature.clone();
+        unauthorized_sig.nonce = holder.inner.trent.lock().unwrap().issue_nonce();
+        let description = unauthorized.description.clone();
+        let mut uo = run_attack(&holder.inner, unauthorized, target);
+        // Annotate: the unauthorized party's verdict would be untrustworthy
+        // — the attempt itself is the event we log for the dashboard.
+        uo.description = description;
+        outcomes.push(uo);
         outcomes
     };
     Ok(Json(outcomes))
@@ -323,6 +348,61 @@ pub async fn qds_events(
     Json(serde_json::json!({ "events": events }))
 }
 
+// ---------------------------------------------------------------------------
+// Performance evaluation endpoint (Lap 2 evaluation deliverable)
+// ---------------------------------------------------------------------------
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct QdsMetricsRequest {
+    /// Legitimate+attack cycles per scheme (statistical sample size).
+    trials: Option<usize>,
+    /// Seed for reproducible evaluation runs.
+    seed: Option<u64>,
+}
+
+/// Run the repeatable performance/security evaluation and return the full
+/// report: verification accuracy, detection rates, false alarms, forgery
+/// probability, and per-operation timings for both QDS schemes.
+pub async fn qds_metrics(
+    State(state): State<std::sync::Arc<AppState>>,
+    raw: axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let trials = raw
+        .get("trials")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(100)
+        .clamp(50, 2_000);
+    let seed = raw
+        .get("seed")
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(42);
+
+    // CPU-bound: run off the async reactor. Hold no locks during the run.
+    let report = tokio::task::spawn_blocking(move || qds::metrics::evaluate(trials, seed))
+        .await
+        .map_err(|e| internal_error(format!("Evaluation task join failure: {e}")))?;
+
+    {
+        let holder = state.qds.lock().unwrap();
+        holder.inner.record(
+            "metrics",
+            "evaluation",
+            true,
+            format!(
+                "performance evaluation over {trials} trials (seed {seed}): teleport accuracy {:.4}, six-state accuracy {:.4}",
+                report.teleport.confusion.accuracy(),
+                report.six_state.confusion.accuracy()
+            ),
+        );
+    }
+    Ok(Json(serde_json::to_value(&report).unwrap_or_default()))
+}
+
+fn internal_error(msg: String) -> AppError {
+    (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": msg })))
+}
+
 /// Build the QDS sub-router.
 pub fn qds_router() -> Router<std::sync::Arc<AppState>> {
     Router::new()
@@ -331,5 +411,6 @@ pub fn qds_router() -> Router<std::sync::Arc<AppState>> {
         .route("/api/qds/verify", post(qds_verify))
         .route("/api/qds/attacks", get(qds_attacks))
         .route("/api/qds/forgery-analysis", get(qds_forgery_analysis))
+        .route("/api/qds/metrics", get(qds_metrics))
         .route("/api/qds/events", get(qds_events))
 }

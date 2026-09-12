@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { healthCheck, runSweep, startRun } from './api'
+import { discoverApiBase, healthCheck, runSweep, setApiBase, startRun } from './api'
 import type { RunEvent, ScenarioResult } from './api'
 import { useRunStream } from './useRunStream'
 import { StatusCard } from './components/StatusCard'
@@ -96,13 +96,27 @@ export default function App() {
     }
   })
 
-  // Backend health polling
+  // Backend health polling with automatic fallback-port discovery:
+  // if the same-origin health check fails, probe the port manifest and the
+  // adjacent ports so the dashboard finds a server that fell back off 8080.
   useEffect(() => {
     let alive = true
-    const check = () =>
-      healthCheck()
-        .then(() => alive && setBackendUp(true))
-        .catch(() => alive && setBackendUp(false))
+    const check = async () => {
+      try {
+        await healthCheck()
+        if (!alive) return
+        setBackendUp(true)
+      } catch {
+        try {
+          const apiBase = await discoverApiBase()
+          if (!alive) return
+          setApiBase(apiBase)
+          setBackendUp(true)
+        } catch {
+          if (alive) setBackendUp(false)
+        }
+      }
+    }
     check()
     const t = setInterval(check, 10000)
     return () => {

@@ -1,0 +1,1 @@
+C:\Users\svage\SigniQ\sih26141-project-qds-updated\sih26141\target\debug\libquantum.rlib: C:\Users\svage\SigniQ\sih26141-project-qds-updated\sih26141\quantum\src\lib.rs

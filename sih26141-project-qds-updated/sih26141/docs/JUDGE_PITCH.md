@@ -81,24 +81,34 @@ Click **Run parameter sweep**.
      through one-one — and the Pauli correction Bob applies. I, X, Z, X-Z.
      Bob verified on delivery — chip is green. The nonce is single-use:
      think of it as a one-time wax seal."*
-3. Click **③ Launch all 4 attacks**.
+3. Click **③ Launch all 5 attacks**.
    - *"Forgery — an attacker just guesses the quantum outcomes: REJECTED.
      Impersonation — reusing a real signature on a different document:
      REJECTED, because the signature is mathematically bound to the message
      hash. Replay — re-presenting an accepted signature: REJECTED by the
      nonce ledger, that's double-spend protection. Channel tampering —
-     disturbing half the qubits in flight: REJECTED by the mismatch
-     statistics. Four independent defenses, zero machine learning."*
+     disturbing qubits in flight — move the slider and watch the mismatch
+     rate climb: REJECTED by the statistics. Unauthorized verification — a
+     party with no key material tries to verify: FLAGGED as its own threat
+     class. Five independent defenses, zero machine learning."*
 4. Click **④ Run analysis**.
    - *"This chart is our forgery-probability guarantee: P equals
      four-to-the-minus q-times-lambda. Each extra security level λ buys
      roughly a thousandfold. The green line is 128-bit security. We exceed
      it at λ equals four."*
-5. If time allows, expand **Theoretical basis & references** at the bottom:
+5. Click **⑤ Run evaluation** in the Performance panel.
+   - *"Every metric the problem statement demands, measured live:
+     verification accuracy above ninety-nine percent, detection rate,
+     false alarms — zero — empirical versus theoretical forgery
+     probability, and the actual computational cost per signature:
+     tens of microseconds. The evaluation is seeded, so every number is
+     reproducible for audit."*
+6. If time allows, expand **Theoretical basis & references** at the bottom:
    *"Every mechanism I just showed maps to one of the three papers in our
    problem statement — Gottesman-Chuang for the verdict semantics,
    Singh-et-al for the teleportation pipeline, Weng-et-al for the six-state
-   encoding and threshold rules."*
+   encoding and threshold rules — which we also implement as a second,
+   complete QDS scheme in the six-state module."*
 
 ### Demo 4 (only if asked or time remains) — the audit log
 
@@ -214,15 +224,16 @@ threat detection'."**
 | Their deliverable | Where it lives |
 |---|---|
 | 1. Math model of teleportation-based QDS | `docs/QDS_MATH_MODEL.md` — Bell states, teleportation derivation, correction table, verification equations, forgery theorem, complexity |
-| 2. Threat-detection framework | `detection` + `qds::verify` — statistical thresholds, all four attack classes detected |
-| 3. Signature generation & verification module | `qds` crate: `sign` / `verify` / teleportation with Pauli corrections; quantum public-key distribution via Trent |
-| 4. Attack simulation module | `qds::attacks` + QKD `attacks` — forgery, impersonation, replay, channel tampering, intercept-resend; all with tests |
+| 2. Threat-detection framework | `detection` + `qds::verify` + `qds::six_state::classify` — statistical/threshold rules, all five attack classes detected |
+| 3. Signature generation & verification module | `qds` crate: `sign` / `verify` / teleportation with Pauli corrections; quantum public-key distribution via Trent; plus the six-state scheme (`six_state::sign_six_state` / `verify_six_state`) |
+| 4. Attack simulation module | `qds::attacks` + QKD `attacks` — forgery, impersonation, replay, channel tampering (adjustable fraction), unauthorized verification, intercept-resend; all with tests |
+| 5. Performance evaluation | `qds::metrics` + `/api/qds/metrics` + dashboard panel — verification accuracy, detection rate, false alarms, forgery probability, per-operation timings; seeded & reproducible |
 | 6. Software framework / prototype | `server` + `frontend` — simulation environment, verification interface, live dashboard, persistent security-event log |
 
 Constraints check: no AI/ML ✓ · deterministic acceptance ✓ (theorem + test) ·
-low complexity ✓ (O(q·λ), microseconds) · information-theoretic security ✓
-(XOR correlations, no computational assumption in the verification path) ·
-prototype + code + documentation ✓.
+low complexity ✓ (O(q·λ), microseconds — measured in the metrics panel) ·
+information-theoretic security ✓ (XOR correlations, no computational
+assumption in the verification path) · prototype + code + documentation ✓.
 
 ---
 
@@ -236,7 +247,7 @@ prototype + code + documentation ✓.
 - Hoeffding margin: **ε = √(ln(2/δ)/2n)**, δ = 0.05, shrinks like 1/√n
 - Detection crossover: **~60–70% interception** at base threshold 15%
 - Sifting yield: **~1/3** of qubits survive (three bases)
-- Tests: **17 passing** (3 QKD unit, 3 QKD integration, 11 QDS)
+- Tests: **35 passing** (3 QKD unit, 3 QKD integration, 29 QDS incl. six-state scheme, noisy thresholds, metrics)
 - Throughput: 20,000 qubits streamed in ~10 s (artificially paced); compute
   itself is microseconds — O(qλ)
 
@@ -265,7 +276,7 @@ same. Screenshots are the last resort; the story doesn't depend on them.
 
 ## Part F — Room-readiness checklist (tonight)
 
-- [ ] `cargo test --workspace` passes (17/17) — run it once tonight
+- [ ] `cargo test --workspace` passes (35/35) — run it once tonight
 - [ ] Server starts: `PORT=8080 cargo run -p server` from `sih26141\`
 - [ ] Browser loads `http://127.0.0.1:8080`, pill says **API online**
 - [ ] Full dry run of Demos 1–3 out loud, timed (target ≤ 7 min)
