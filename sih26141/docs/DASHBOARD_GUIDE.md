@@ -14,7 +14,7 @@ each control — use it to verify the app is behaving before a demo.
 *Companion docs:* `DASHBOARD_RUN_GUIDE.md` (how to start the app),
 `JUDGING_BOOK.md` (what to say), `PROJECT_GUIDE.md` (full theory),
 `QDS_MATH_MODEL.md` (the formal math behind section 8).
-
+Yes.
 ---
 
 ## 1. Page orientation
