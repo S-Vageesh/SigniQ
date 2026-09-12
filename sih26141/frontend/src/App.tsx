@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { healthCheck, runSweep, startRun } from './api'
+import { discoverApiBase, healthCheck, runSweep, setApiBase, startRun } from './api'
 import type { RunEvent, ScenarioResult } from './api'
 import { useRunStream } from './useRunStream'
 import { StatusCard } from './components/StatusCard'
 import { LiveMonitor } from './components/LiveMonitor'
 import { SweepPanel } from './components/SweepPanel'
+import { QdsLab } from './components/QdsLab'
 
 export interface LiveScenario {
   processed: number
@@ -30,6 +31,7 @@ export default function App() {
   const [eveRatio, setEveRatio] = useState(0.3)
   const [paceMs, setPaceMs] = useState(6)
   const [seed, setSeed] = useState('')
+  const [lastSeed, setLastSeed] = useState<number | null>(null)
   const [message, setMessage] = useState('SIH26141 Sensitive Financial Transaction Data')
 
   // --- run state ---
@@ -95,13 +97,27 @@ export default function App() {
     }
   })
 
-  // Backend health polling
+  // Backend health polling with automatic fallback-port discovery:
+  // if the same-origin health check fails, probe the port manifest and the
+  // adjacent ports so the dashboard finds a server that fell back off 8080.
   useEffect(() => {
     let alive = true
-    const check = () =>
-      healthCheck()
-        .then(() => alive && setBackendUp(true))
-        .catch(() => alive && setBackendUp(false))
+    const check = async () => {
+      try {
+        await healthCheck()
+        if (!alive) return
+        setBackendUp(true)
+      } catch {
+        try {
+          const apiBase = await discoverApiBase()
+          if (!alive) return
+          setApiBase(apiBase)
+          setBackendUp(true)
+        } catch {
+          if (alive) setBackendUp(false)
+        }
+      }
+    }
     check()
     const t = setInterval(check, 10000)
     return () => {
@@ -115,6 +131,15 @@ export default function App() {
     if (t === '') return undefined
     const n = Number(t)
     return Number.isFinite(n) ? n : undefined
+  }
+
+  // "Seed (blank = random)" must actually be random: if a caller passes a
+  // hardcoded fallback here, charts stop responding to parameter changes and
+  // every sweep looks identical. Echo the server's actually-used seed so the
+  // event log shows why a run was (or wasn't) reproducible.
+  const describeSeed = (used?: number): string => {
+    setLastSeed(used ?? null)
+    return used !== undefined ? `seed ${used}` : 'random seed'
   }
 
   const handleRun = async () => {
@@ -136,7 +161,11 @@ export default function App() {
       runIdRef.current = resp.run_id
       setResults(resp.results)
       const ok = resp.results.filter((r) => r.is_authentic).length
-      pushLog(`Run #${resp.run_id}: ${ok}/${resp.results.length} scenarios authentic`)
+      pushLog(
+        `Run #${resp.run_id}: ${ok}/${resp.results.length} scenarios authentic · ` +
+          `${describeSeed(resp.seed)} · ${keyLength.toLocaleString()} qubits · ` +
+          `threshold ${(threshold * 100).toFixed(0)}%`,
+      )
     } catch (e) {
       acceptingRef.current = false
       setRunning(false)
@@ -152,7 +181,7 @@ export default function App() {
         intercept_ratios: Array.from({ length: 11 }, (_, i) => i / 10),
         key_length: keyLength,
         base_threshold: threshold,
-        seed: parseSeed() ?? 42,
+        seed: parseSeed(),
       })
       setSweep(
         resp.sweep.map((s) => ({
@@ -162,7 +191,10 @@ export default function App() {
           theory: s.intercept_ratio / 3,
         })),
       )
-      pushLog(`Sweep complete: ${resp.sweep.length} intercept ratios evaluated`)
+      pushLog(
+        `Sweep complete: ${resp.sweep.length} intercept ratios · ` +
+          `${describeSeed(resp.seed)} · ${keyLength.toLocaleString()} qubits`,
+      )
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -265,7 +297,12 @@ export default function App() {
             <span>Seed (blank = random)</span>
             <input
               type="number"
-              placeholder="random"
+              placeholder={lastSeed !== null ? `last run: ${lastSeed}` : 'random'}
+              title={
+                lastSeed !== null
+                  ? `Last run used seed ${lastSeed} — type it in to reproduce that exact result`
+                  : 'Blank = fresh randomness each run; type a number to get reproducible results'
+              }
               value={seed}
               onChange={(e) => setSeed(e.target.value)}
             />
@@ -292,9 +329,11 @@ export default function App() {
         })}
       </section>
 
-      <LiveMonitor live={live} log={log} running={running} />
+      <LiveMonitor live={live} log={log} running={running} baseThreshold={threshold} />
 
       <SweepPanel data={sweep} loading={sweepLoading} onRun={handleSweep} />
+
+      <QdsLab />
 
       {results.length > 0 && (
         <section className="panel">

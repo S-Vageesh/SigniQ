@@ -5,6 +5,7 @@
 //!   POST /api/run      — full simulation (secure + attack scenarios) with live SSE progress
 //!   POST /api/simulate — parameter sweep over intercept ratios
 //!   GET  /api/events   — SSE stream of live run events
+//!   /api/qds/*         — teleportation-based QDS signature lab (see qds_api.rs)
 //!   GET  /             — serves the built frontend from ../frontend/dist
 
 use axum::extract::State;
@@ -12,10 +13,12 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use qds_api::{qds_router, QdsStateHolder};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
@@ -27,6 +30,9 @@ use tower_http::cors::CorsLayer;
 use crypto::{compute_message_hmac, verify_message_hmac};
 use detection::ThreatDetector;
 use quantum::{privacy_amplification, ChannelSession, QuantumKeyGenerator, SiftedKeyResult};
+
+mod qds_api;
+mod qds_state;
 
 const DEFAULT_PORT: u16 = 8080;
 const DEFAULT_KEY_LENGTH: usize = 3000;
@@ -63,6 +69,15 @@ struct AppState {
     /// Last completed run per run_id, so late SSE subscribers can catch up.
     last_result: Mutex<Option<RunResponse>>,
     run_counter: AtomicU64,
+    /// QDS signature-lab state (Trent + event log + last signature).
+    qds: Mutex<QdsStateHolder>,
+    /// Path of the persistent QDS security-event log (JSONL).
+    qds_log_path: PathBuf,
+    /// The port the server actually bound (differs from the request only
+    /// after a port-fallback; the frontend discovers it via /api/server-info
+    /// and frontend/dist/server-port.json). Atomic because the listener is
+    /// bound after state construction.
+    bound_port: std::sync::atomic::AtomicU16,
 }
 
 #[derive(Debug, Deserialize)]
@@ -206,6 +221,9 @@ fn execute_scenario_streaming(
 #[derive(Debug, Clone, Serialize)]
 struct RunResponse {
     run_id: u64,
+    /// The seed actually used (echoed so the dashboard can display why a
+    /// run is reproducible: a typed-in seed re-produces identical results).
+    seed: u64,
     results: Vec<ScenarioResult>,
     authenticated_message: Option<String>,
 }
@@ -214,12 +232,27 @@ async fn health() -> &'static str {
     "ok"
 }
 
-fn bad_request(msg: String) -> (StatusCode, Json<serde_json::Value>) {
+/// Which port the server actually bound (differs from the request only after
+/// a port-fallback). The frontend uses this to locate a fallback server.
+async fn server_info(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "port": state.bound_port.load(std::sync::atomic::Ordering::Relaxed)
+    }))
+}
+
+pub(crate) fn bad_request(msg: String) -> (StatusCode, Json<serde_json::Value>) {
     (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": msg })))
 }
 
 fn internal_error(msg: String) -> (StatusCode, Json<serde_json::Value>) {
     (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": msg })))
+}
+
+fn random_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(42)
 }
 
 fn validate_common(key_length: usize, base_threshold: f64) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
@@ -260,12 +293,7 @@ async fn run_handler(
     };
 
     let run_id = state.run_counter.fetch_add(1, Ordering::SeqCst);
-    let seed = req.seed.unwrap_or_else(|| {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(42)
-    });
+    let seed = req.seed.unwrap_or_else(random_seed);
 
     let state_clone = Arc::clone(&state);
     let response = tokio::task::spawn_blocking(move || -> Result<RunResponse, String> {
@@ -290,6 +318,7 @@ async fn run_handler(
         }
         Ok(RunResponse {
             run_id,
+            seed,
             results,
             authenticated_message: Some(message),
         })
@@ -315,6 +344,9 @@ struct SimulateRequest {
 #[derive(Debug, Serialize)]
 struct SimulateResponse {
     run_id: u64,
+    /// The seed actually used (blank seed in the UI = fresh random seed,
+    /// echoed here so every chart can be attributed to its randomness).
+    seed: u64,
     sweep: Vec<ScenarioResult>,
 }
 
@@ -338,7 +370,10 @@ async fn simulate_handler(
     }
 
     let run_id = state.run_counter.fetch_add(1, Ordering::SeqCst);
-    let seed = req.seed.unwrap_or(42);
+    // Blank seed means fresh randomness here too — the dashboard labels the
+    // "Seed (blank = random)" input, so a pinned default would make every
+    // sweep visually identical. Callers who want reproducibility pass a seed.
+    let seed = req.seed.unwrap_or_else(random_seed);
 
     let response = tokio::task::spawn_blocking(move || -> Result<SimulateResponse, String> {
         let mut rng = StdRng::seed_from_u64(seed);
@@ -351,7 +386,7 @@ async fn simulate_handler(
                 .map_err(|e| format!("Sweep point {i} failed: {e}"))?;
             sweep.push(result);
         }
-        Ok(SimulateResponse { run_id, sweep })
+        Ok(SimulateResponse { run_id, seed, sweep })
     })
     .await
     .map_err(|e| internal_error(format!("Task join failure: {e}")))?
@@ -389,26 +424,44 @@ async fn sse_handler(
 #[tokio::main]
 async fn main() {
     let (events_tx, _) = broadcast::channel(1024);
+
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(DEFAULT_PORT);
+
+    // Serve the built frontend when present (frontend/dist), else API-only.
+    let static_dir = std::env::var("FRONTEND_DIST")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../frontend/dist")
+        });
+
+    // Persistent QDS security-event log next to the executable's workspace.
+    let qds_log_path = std::env::var("QDS_EVENT_LOG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("qds_events.jsonl"));
+    let qds_state = QdsStateHolder::new(qds_log_path.clone());
+
     let state = Arc::new(AppState {
         events_tx,
         last_result: Mutex::new(None),
         run_counter: AtomicU64::new(1),
+        qds: Mutex::new(qds_state),
+        qds_log_path,
+        // Patched once the listener is bound (fallback may change it).
+        bound_port: std::sync::atomic::AtomicU16::new(port),
     });
 
     let app = Router::new()
         .route("/api/health", get(health))
+        .route("/api/server-info", get(server_info))
         .route("/api/run", post(run_handler))
         .route("/api/simulate", post(simulate_handler))
         .route("/api/events", get(sse_handler))
+        .merge(qds_router())
         .layer(CorsLayer::permissive())
-        .with_state(state);
-
-    // Serve the built frontend when present (frontend/dist), else API-only.
-    let static_dir = std::env::var("FRONTEND_DIST")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../frontend/dist")
-        });
+        .with_state(Arc::clone(&state));
 
     let app = if static_dir.join("index.html").exists() {
         app.fallback_service(
@@ -420,11 +473,67 @@ async fn main() {
         app
     };
 
-    let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
+    // Bind with a clear error message and, on Windows, a fallback: OS error
+    // 10013 (PermissionDenied) happens when another process holds the port
+    // OR when Windows excluded port ranges (Hyper-V / WinNAT reservations)
+    // block it entirely — common right after a reboot. Fall back to the next
+    // few ports so a demo never dies on a stale reservation.
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("failed to bind port");
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            const MAX_FALLBACKS: u16 = 10;
+            eprintln!(
+                "warning: could not bind {addr} (os error 10013 — port held by another process or blocked by a Windows reserved port range)"
+            );
+            let mut bound = None;
+            for offset in 1..=MAX_FALLBACKS {
+                let candidate = SocketAddr::from(([127, 0, 0, 1], port + offset));
+                match tokio::net::TcpListener::bind(candidate).await {
+                    Ok(l) => {
+                        eprintln!("falling back to {candidate}");
+                        bound = Some(l);
+                        break;
+                    }
+                    Err(_) => continue,
+                }
+            }
+            bound.unwrap_or_else(|| {
+                panic!(
+                    "failed to bind port {port} or any of the next {MAX_FALLBACKS} ports — free the port (netstat -ano | findstr {port}) or pick another: PORT=<port> cargo run -p server"
+                )
+            })
+        }
+        Err(e) => panic!("failed to bind port {port}: {e}"),
+    };
 
-    eprintln!("SIH26141 API server listening on http://{addr}");
+    let bound_addr = listener.local_addr().expect("listener has a local address");
+    state.bound_port.store(bound_addr.port(), std::sync::atomic::Ordering::Relaxed);
+    if bound_addr.port() != port {
+        // Publish the actual bound port so the dashboard can find the API
+        // even after a fallback: the frontend probes /server-port.json
+        // (served as a static asset from frontend/dist) when its same-origin
+        // health check fails.
+        let manifest = serde_json::json!({
+            "requested_port": port,
+            "actual_port": bound_addr.port(),
+            "reason": "requested port unavailable (held by another process or blocked by a Windows reserved port range)"
+        });
+        let port_file = static_dir.join("server-port.json");
+        match std::fs::write(&port_file, manifest.to_string()) {
+            Ok(()) => eprintln!(
+                "NOTE: serving on http://{bound_addr} instead of http://127.0.0.1:{port} — wrote {}",
+                port_file.display()
+            ),
+            Err(e) => eprintln!(
+                "NOTE: serving on http://{bound_addr}; could not write port manifest ({e}) — open this URL manually"
+            ),
+        }
+    } else {
+        // Clean up any stale manifest from a previous fallback run.
+        let _ = std::fs::remove_file(static_dir.join("server-port.json"));
+    }
+    eprintln!("SIH26141 API server listening on http://{bound_addr}");
     eprintln!("Frontend: {}", static_dir.display());
 
     axum::serve(listener, app).await.expect("server error");

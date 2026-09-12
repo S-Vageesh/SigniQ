@@ -4,6 +4,7 @@ members = [
     "crypto",
     "detection",
     "attacks",
+    "qds",
     "main_app",
     "server",
     "tests",

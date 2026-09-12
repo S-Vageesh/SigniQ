@@ -367,6 +367,199 @@ body {
 
 .muted-line { color: var(--text-dim); }
 
+/* ---------- QDS lab ---------- */
+.qds-keyinfo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.qds-keyinfo b { color: var(--text); }
+
+.commitment {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.qds-sign-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.qds-message {
+  flex: 1;
+  background: var(--bg-raise);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.qds-sign-result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.qds-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.qds-teleport-title {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+}
+
+.qds-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.qds-table th {
+  text-align: left;
+  padding: 6px 12px;
+  color: var(--text-faint);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+.qds-table td {
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.qds-table tr:last-child td { border-bottom: none; }
+
+.correction {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  color: var(--amber);
+  font-weight: 700;
+}
+
+.qds-sigbits { font-size: 12px; }
+.qds-sigbits .k { color: var(--text-faint); margin-right: 8px; }
+
+.qds-sigbits code {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  color: var(--amber);
+  word-break: break-all;
+}
+
+.qds-attacks {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.attack-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.attack-good { border-left: 3px solid var(--green); }
+.attack-bad { border-left: 3px solid var(--red); }
+
+.attack-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.attack-desc { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
+
+.attack-stats { font-size: 11px; color: var(--text-faint); }
+
+.qds-forgery { margin-top: 6px; }
+
+.qds-tamper-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.qds-metrics { margin-top: 10px; }
+
+.qds-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.qds-metric-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.qds-metric-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.qds-metric-rows div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  padding: 2px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+}
+
+.qds-metric-rows div:last-child { border-bottom: none; }
+
+.qds-metric-rows .k { color: var(--text-faint); }
+
+.qds-metric-rows b { color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }
+
+.refs-block {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.refs-block summary {
+  cursor: pointer;
+  color: var(--text-faint);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.refs-block ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* ---------- misc ---------- */
 .error-banner {
   background: rgba(248, 113, 113, 0.1);

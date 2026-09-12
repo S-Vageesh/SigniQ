@@ -455,6 +455,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "qds"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "rand",
+ "serde",
+ "sha2",
+]
+
+[[package]]
 name = "quantum"
 version = "0.1.0"
 dependencies = [
@@ -596,6 +606,8 @@ dependencies = [
  "axum",
  "crypto",
  "detection",
+ "hex",
+ "qds",
  "quantum",
  "rand",
  "serde",

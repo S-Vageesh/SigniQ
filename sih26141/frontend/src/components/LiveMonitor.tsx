@@ -5,6 +5,8 @@ interface Props {
   live: Record<string, LiveScenario>
   log: string[]
   running: boolean
+  /** Base threshold from the slider — drives the dashed reference line. */
+  baseThreshold: number
 }
 
 const SERIES: Record<string, { color: string; label: string }> = {
@@ -13,7 +15,7 @@ const SERIES: Record<string, { color: string; label: string }> = {
   custom: { color: '#fbbf24', label: 'Custom ratio' },
 }
 
-export function LiveMonitor({ live, log, running }: Props) {
+export function LiveMonitor({ live, log, running, baseThreshold }: Props) {
   const names = Object.keys(live)
   if (names.length === 0) return null
 
@@ -123,7 +125,12 @@ export function LiveMonitor({ live, log, running }: Props) {
                 />
               )
             })}
-            <ReferenceLine y={0.15} stroke="#475569" strokeDasharray="2 2" label={{ value: 'base 15%', fill: '#475569', fontSize: 10, position: 'insideTopRight' }} />
+            <ReferenceLine
+              y={baseThreshold}
+              stroke="#475569"
+              strokeDasharray="2 2"
+              label={{ value: `base ${(baseThreshold * 100).toFixed(0)}%`, fill: '#475569', fontSize: 10, position: 'insideTopRight' }}
+            />
           </LineChart>
         </ResponsiveContainer>
       </div>
