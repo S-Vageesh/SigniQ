@@ -1,2 +1,0 @@
-[build]
-cmd = "cargo build --release --package server"
